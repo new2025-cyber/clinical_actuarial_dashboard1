@@ -213,4 +213,5 @@ st.download_button(
 )
 
 st.markdown("---")
-st.caption("Run locally: `streamlit run app.py`  |  Developed for clinical–actuarial risk profiling.")
+st.caption("Run locally: `streamlit run app.py`  |  Developed by mudather abuelgassim.")
+
