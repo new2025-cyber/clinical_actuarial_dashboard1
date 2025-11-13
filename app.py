@@ -35,11 +35,11 @@ if uploaded:
     else:
         data = pd.read_excel(uploaded)
 
-    # Required columns
     required_cols = [
-        "patient_id", "BAS", "CRS", "CARS",
-        "PCS", "PPS", "FEI", "provider_readmit_score"
-    ]
+    "patient_id", "BAS", "CRS", "CARS",
+    "PCS", "PPS", "FEI"
+]
+
 
     missing = [c for c in required_cols if c not in data.columns]
     if missing:
