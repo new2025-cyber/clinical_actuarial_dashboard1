@@ -9,7 +9,8 @@ import io
 # ------------------------------
 # ADMIN MODE CHECK
 # ------------------------------
-ADMIN_KEY = st.secrets.get("ADMIN_KEY", "")
+ADMIN_KEY = ""
+
 input_key = st.sidebar.text_input("Admin Key (optional)", type="password")
 IS_ADMIN = (input_key == ADMIN_KEY and input_key != "")
 
@@ -169,4 +170,3 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.caption("Model v1.3 • " + pd.Timestamp.today().strftime("%Y-%m-%d"))
-
