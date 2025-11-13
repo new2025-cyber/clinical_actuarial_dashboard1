@@ -1,4 +1,6 @@
 import io
+import os
+import csv
 import datetime as dt
 
 import numpy as np
@@ -11,38 +13,41 @@ from streamlit_autorefresh import st_autorefresh
 
 
 # =========================================================
-# ADMIN KEY (اختياري – آمن محلياً)
+# ADMIN KEY (اختياري – للتحكم في الإعدادات)
 # =========================================================
 def get_admin_key():
     try:
         return st.secrets["ADMIN_KEY"]
     except Exception:
-        return ""  # لا يوجد secrets محلياً
+        return ""
 
 
 ADMIN_KEY = get_admin_key()
+MODEL_VERSION = "v2.1"
 
 st.set_page_config(page_title="Clinical–Actuarial UPI Dashboard", layout="wide")
-st.title("Clinical–Actuarial UPI Dashboard – 3-Level View")
+st.title("Clinical–Actuarial UPI Dashboard – 3-Level Model + Governance")
 
 admin_input = st.sidebar.text_input("Admin key (optional)", type="password")
 IS_ADMIN = ADMIN_KEY != "" and admin_input == ADMIN_KEY
 
 if not IS_ADMIN:
     st_autorefresh(interval=15 * 60 * 1000, key="public_refresh")
-    st.sidebar.caption("Public view (auto-refresh every 15 minutes).")
+    st.sidebar.caption("Public mode (auto-refresh every 15 minutes)")
 else:
-    st.sidebar.caption("Admin mode active.")
+    st.sidebar.caption("Admin mode active")
 
 
 # =========================================================
-# ملف البيانات
+# UPLOAD DATA
 # =========================================================
 uploaded = st.file_uploader("Upload Patient File (CSV or Excel)", type=["csv", "xlsx"])
 
 if uploaded is None:
-    st.info("Please upload a CSV/Excel file containing patient scores.")
+    st.info("Please upload a dataset.")
     st.stop()
+
+dataset_name = uploaded.name
 
 ext = uploaded.name.split(".")[-1].lower()
 if ext == "csv":
@@ -50,24 +55,23 @@ if ext == "csv":
 else:
     data = pd.read_excel(uploaded)
 
-# الأعمدة الأساسية المطلوبة لحساب UPI
 required_cols = ["patient_id", "BAS", "CRS", "CARS", "PCS", "PPS", "FEI"]
 missing = [c for c in required_cols if c not in data.columns]
 if missing:
     st.error(f"Missing required columns: {missing}")
     st.stop()
 
-# أعمدة اختيارية للمستويات الأعلى
-has_region = "region" in data.columns          # لمستوى 1 (Regional risk)
-has_provider_name = "provider_name" in data.columns  # لمستوى 1+2
-has_period = "period" in data.columns          # لكل مستويات الـ trend
-has_drg = "drg_group" in data.columns          # لمستوى 2 (DRG shift)
+# Optional columns
+has_region = "region" in data.columns
+has_provider = "provider_name" in data.columns
+has_period = "period" in data.columns
+has_drg = "drg_group" in data.columns
 has_claims = "claims_amount" in data.columns
 has_premium = "premium_amount" in data.columns
 
 
 # =========================================================
-# Normalize & Weights
+# NORMALIZATION & WEIGHTS
 # =========================================================
 st.sidebar.markdown("### Normalization")
 
@@ -76,6 +80,7 @@ norm_method = st.sidebar.selectbox(
     ["MinMax (0–100)", "Z-score (mean±SD)", "None"],
     index=0,
 )
+
 
 def normalize(series: pd.Series) -> pd.Series:
     s = pd.to_numeric(series, errors="coerce")
@@ -88,34 +93,35 @@ def normalize(series: pd.Series) -> pd.Series:
         return 50 + 10 * z
     return s
 
+
 for col in ["BAS", "CRS", "CARS", "PCS", "PPS", "FEI"]:
     data[col] = normalize(data[col])
 
+
 st.sidebar.markdown("### UPI Weights")
-wBAS = st.sidebar.slider("Weight BAS", 0.0, 1.0, 0.25, 0.01)
-wCRS = st.sidebar.slider("Weight CRS", 0.0, 1.0, 0.25, 0.01)
-wCARS = st.sidebar.slider("Weight CARS", 0.0, 1.0, 0.25, 0.01)
-wPEN = st.sidebar.slider("Weight Provider Penalty", 0.0, 1.0, 0.15, 0.01)
-wFEI = st.sidebar.slider("Weight FEI", 0.0, 1.0, 0.10, 0.01)
+wBAS = st.sidebar.slider("BAS weight", 0.0, 1.0, 0.25, 0.01)
+wCRS = st.sidebar.slider("CRS weight", 0.0, 1.0, 0.25, 0.01)
+wCARS = st.sidebar.slider("CARS weight", 0.0, 1.0, 0.25, 0.01)
+wPEN = st.sidebar.slider("Provider Penalty weight", 0.0, 1.0, 0.15, 0.01)
+wFEI = st.sidebar.slider("FEI weight", 0.0, 1.0, 0.10, 0.01)
 
 total_w = wBAS + wCRS + wCARS + wPEN + wFEI
 if abs(total_w - 1.0) > 0.02:
-    st.sidebar.warning(f"Total weights = {total_w:.2f}. Ideally sum ≈ 1.00")
-
+    st.sidebar.warning(f"Total weights = {total_w:.2f}. Ideal total = 1.00")
 
 st.sidebar.markdown("### Risk thresholds")
-high_thr = st.sidebar.slider("High risk threshold", 50, 95, 80, 1)
-med_thr = st.sidebar.slider("Medium risk threshold", 40, 89, 60, 1)
+high_thr = st.sidebar.slider("High-risk threshold", 50, 95, 80, 1)
+med_thr = st.sidebar.slider("Medium-risk threshold", 40, 89, 60, 1)
 
 
 # =========================================================
-# Provider Penalty + UPI
+# CALCULATIONS
 # =========================================================
-def calc_provider_penalty(row) -> float:
+def calc_provider_penalty(row):
     return 0.6 * (100 - row["PCS"]) + 0.4 * (100 - row["PPS"])
 
 
-def calc_upi(row) -> float:
+def calc_upi(row):
     return (
         wBAS * row["BAS"]
         + wCRS * row["CRS"]
@@ -125,7 +131,7 @@ def calc_upi(row) -> float:
     )
 
 
-def classify_risk(upi: float) -> str:
+def classify_risk(upi):
     if upi >= high_thr:
         return "High Risk"
     if upi >= med_thr:
@@ -139,100 +145,110 @@ data["risk_level"] = data["UPI"].apply(classify_risk)
 
 
 # =========================================================
-# Tabs: 3 مستويات
+# LOGGING SYSTEM
 # =========================================================
-tab_strat, tab_fac, tab_patient = st.tabs(
-    [
-        "Level 1 – Strategic Executive Dashboard",
-        "Level 2 – Facility Performance",
-        "Level 3 – Patient Risk Panel",
+LOG_DIR = "logs"
+LOG_FILE = os.path.join(LOG_DIR, "upi_runs_log.csv")
+
+
+def log_run(df, dataset_name):
+    os.makedirs(LOG_DIR, exist_ok=True)
+
+    now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    total = len(df)
+    high = int((df["risk_level"] == "High Risk").sum())
+    pct = (100 * high / total) if total > 0 else 0
+    avg_upi = df["UPI"].mean() if total > 0 else 0
+
+    weights = f"BAS={wBAS:.2f};CRS={wCRS:.2f};CARS={wCARS:.2f};PEN={wPEN:.2f};FEI={wFEI:.2f}"
+    thresholds = f"high={high_thr};medium={med_thr}"
+
+    header = [
+        "timestamp", "model_version", "dataset_name",
+        "total_patients", "high_risk_patients", "high_risk_pct",
+        "avg_upi", "norm_method", "weights", "thresholds"
     ]
-)
+
+    row = [
+        now, MODEL_VERSION, dataset_name,
+        total, high, f"{pct:.2f}",
+        f"{avg_upi:.2f}", norm_method, weights, thresholds
+    ]
+
+    exists = os.path.isfile(LOG_FILE)
+    with open(LOG_FILE, "a", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        if not exists:
+            writer.writerow(header)
+        writer.writerow(row)
+
+
+# =========================================================
+# TABS (4 Tabs)
+# =========================================================
+tab_strat, tab_fac, tab_patient, tab_logs = st.tabs([
+    "Level 1 – Strategic Executive Dashboard",
+    "Level 2 – Facility Performance",
+    "Level 3 – Patient Risk Panel",
+    "Model Governance / Logs",
+])
+
 
 # ---------------------------------------------------------
-# LEVEL 1 – STRATEGIC EXECUTIVE DASHBOARD
+# LEVEL 1 – STRATEGIC DASHBOARD
 # ---------------------------------------------------------
 with tab_strat:
     st.subheader("Level 1 – Strategic Executive Dashboard")
 
-    # --- KPIs ---
     c1, c2, c3 = st.columns(3)
-    total_patients = len(data)
-    high_risk_patients = int((data["risk_level"] == "High Risk").sum())
-    avg_upi = float(data["UPI"].mean())
+    c1.metric("Total Patients", len(data))
+    c2.metric("High-Risk", int((data["risk_level"] == "High Risk").sum()))
+    c3.metric("Average UPI", f"{data['UPI'].mean():.1f}")
 
-    c1.metric("Total Patients", total_patients)
-    c2.metric("High-Risk Patients", high_risk_patients)
-    c3.metric("Average UPI", f"{avg_upi:.1f}")
+    if st.button("Log this run (append to logs/upi_runs_log.csv)"):
+        log_run(data, dataset_name)
+        st.success("Run logged successfully")
 
     st.markdown("---")
 
-    # 1) UPI Trend (central index)
-    st.markdown("### 1) Unified Predictive Index – UPI Trend")
+    # 1) UPI Trend
+    st.markdown("### 1) UPI Trend")
     if has_period:
-        trend = (
-            data.groupby("period")["UPI"]
-            .mean()
-            .reset_index()
-            .sort_values("period")
-        )
-        fig_trend = px.line(
-            trend,
-            x="period",
-            y="UPI",
-            markers=True,
-            title="UPI Trend over time",
-            template="plotly_white",
-        )
-        st.plotly_chart(fig_trend, use_container_width=True)
+        trend = data.groupby("period")["UPI"].mean().reset_index()
+        fig = px.line(trend, x="period", y="UPI", markers=True, template="plotly_white")
+        st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("No 'period' column found. Add a period/month field to enable UPI trend.")
+        st.info("Add 'period' column to enable UPI Trend")
 
     # 2) Loss Ratio vs UPI
-    st.markdown("### 2) Loss Ratio vs UPI (Financial Impact)")
+    st.markdown("### 2) Loss Ratio vs UPI")
     if has_claims and has_premium and has_period:
-        agg_fin = (
-            data.groupby("period")
-            .agg(
-                avg_upi=("UPI", "mean"),
-                claims=("claims_amount", "sum"),
-                premium=("premium_amount", "sum"),
-            )
-            .reset_index()
-            .sort_values("period")
-        )
-        agg_fin["loss_ratio"] = 100 * agg_fin["claims"] / agg_fin["premium"].replace(0, np.nan)
+        dfc = data.groupby("period").agg(
+            avg_upi=("UPI", "mean"),
+            claims=("claims_amount", "sum"),
+            premium=("premium_amount", "sum"),
+        ).reset_index()
+        dfc["loss_ratio"] = 100 * dfc["claims"] / dfc["premium"].replace(0, np.nan)
 
-        fig_lr = px.line(
-            agg_fin,
-            x="period",
-            y=["avg_upi", "loss_ratio"],
-            title="Loss Ratio vs UPI",
-            labels={"value": "Value", "variable": "Metric"},
-            template="plotly_white",
+        fig = px.line(
+            dfc, x="period", y=["avg_upi", "loss_ratio"],
+            title="Loss Ratio vs UPI", template="plotly_white"
         )
-        st.plotly_chart(fig_lr, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("To enable Loss Ratio vs UPI, add 'claims_amount', 'premium_amount', and 'period' columns.")
+        st.info("Add claims_amount + premium_amount + period to enable this chart")
 
-    # 3) Regional Risk Heatmap (simplified as bar chart)
-    st.markdown("### 3) Regional Risk Overview")
+    # 3) Regional risk
+    st.markdown("### 3) Average UPI by Region")
     if has_region:
         reg = data.groupby("region")["UPI"].mean().reset_index()
-        fig_reg = px.bar(
-            reg,
-            x="region",
-            y="UPI",
-            title="Average UPI by Region",
-            template="plotly_white",
-        )
-        st.plotly_chart(fig_reg, use_container_width=True)
+        st.plotly_chart(px.bar(reg, x="region", y="UPI", template="plotly_white"), use_container_width=True)
     else:
-        st.info("No 'region' column found. Add region/province to enable regional risk view.")
+        st.info("Add 'region' column to enable Region View")
 
-    # 4) Provider Risk Ranking (Top 10 Hospitals)
-    st.markdown("### 4) Provider Risk Ranking – Top 10 Hospitals")
-    if has_provider_name:
+    # 4) Provider Ranking
+    st.markdown("### 4) Top 10 Providers by UPI")
+    if has_provider:
         prov = (
             data.groupby("provider_name")["UPI"]
             .mean()
@@ -240,240 +256,215 @@ with tab_strat:
             .sort_values("UPI", ascending=False)
             .head(10)
         )
-        fig_top = px.bar(
-            prov,
-            x="provider_name",
-            y="UPI",
-            title="Top 10 Providers by Average UPI",
-            template="plotly_white",
-        )
-        st.plotly_chart(fig_top, use_container_width=True)
+        st.plotly_chart(px.bar(prov, x="provider_name", y="UPI", template="plotly_white"))
         st.dataframe(prov, use_container_width=True)
     else:
-        st.info("No 'provider_name' column found. Add it to enable provider ranking.")
-
-    st.markdown("---")
-
-    # Download section (CSV + PDF)
-    st.markdown("### Downloads (Network-level Summary)")
-
-    # CSV
-    csv_buf = io.StringIO()
-    data.to_csv(csv_buf, index=False)
-    st.download_button(
-        "Download full dataset (CSV)",
-        data=csv_buf.getvalue(),
-        file_name="upi_full_dataset.csv",
-        mime="text/csv",
-    )
-
-    # PDF Summary
-    def generate_pdf_summary(df: pd.DataFrame) -> io.BytesIO:
-        buf = io.BytesIO()
-        pdf = canvas.Canvas(buf, pagesize=letter)
-        pdf.setFont("Helvetica-Bold", 14)
-        pdf.drawString(30, 750, "Clinical–Actuarial UPI – Strategic Summary")
-
-        pdf.setFont("Helvetica", 11)
-        pdf.drawString(30, 730, f"Total Patients: {len(df)}")
-        pdf.drawString(30, 715, f"High-Risk Patients: {(df['risk_level']=='High Risk').sum()}")
-        pdf.drawString(30, 700, f"Average UPI: {df['UPI'].mean():.2f}")
-        pdf.drawString(30, 680, f"Generated: {dt.datetime.now().strftime('%Y-%m-%d %H:%M')}")
-
-        pdf.drawString(30, 655, f"High threshold: {high_thr}   Medium threshold: {med_thr}")
-        pdf.drawString(30, 640, f"Normalization: {norm_method}")
-        pdf.drawString(30, 625, f"Weights – BAS:{wBAS:.2f}, CRS:{wCRS:.2f}, CARS:{wCARS:.2f}, PEN:{wPEN:.2f}, FEI:{wFEI:.2f}")
-
-        pdf.showPage()
-        pdf.save()
-        buf.seek(0)
-        return buf
-
-    if st.button("Generate Strategic PDF Summary"):
-        pdf_file = generate_pdf_summary(data)
-        st.download_button(
-            "Download Strategic PDF Summary",
-            data=pdf_file,
-            file_name="upi_strategic_summary.pdf",
-            mime="application/pdf",
-        )
+        st.info("Add 'provider_name' column to enable provider ranking")
 
 
 # ---------------------------------------------------------
-# LEVEL 2 – FACILITY PERFORMANCE DASHBOARD
+# LEVEL 2 – FACILITY PERFORMANCE
 # ---------------------------------------------------------
 with tab_fac:
     st.subheader("Level 2 – Facility Performance Dashboard")
 
-    if not has_provider_name:
-        st.info("No 'provider_name' column found in the dataset. Add it to enable facility-level analytics.")
+    if not has_provider:
+        st.info("Add 'provider_name' column to use this dashboard")
     else:
-        providers = sorted(data["provider_name"].dropna().unique())
-        selected_provider = st.selectbox("Select provider / hospital", providers)
+        providers = sorted(data["provider_name"].unique())
+        selected_provider = st.selectbox("Select provider", providers)
 
-        df_p = data[data["provider_name"] == selected_provider].copy()
+        dfp = data[data["provider_name"] == selected_provider]
 
-        if df_p.empty:
-            st.warning("No patients found for this provider.")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Patients", len(dfp))
+        c2.metric("High-Risk", int((dfp["risk_level"] == "High Risk").sum()))
+        c3.metric("Avg UPI", f"{dfp['UPI'].mean():.1f}")
+
+        st.markdown("---")
+
+        # Risk Composition
+        comp = dfp[["BAS", "CRS", "CARS", "PCS", "PPS", "FEI"]].mean().reset_index()
+        comp.columns = ["Score", "Value"]
+        st.plotly_chart(px.bar(comp, x="Score", y="Value", template="plotly_white"))
+
+        # UPI vs Network
+        c4, c5 = st.columns(2)
+        c4.metric("Provider Avg UPI", f"{dfp['UPI'].mean():.1f}")
+        c5.metric("Network Avg UPI", f"{data['UPI'].mean():.1f}")
+
+        # DRG Shift
+        st.markdown("### DRG Risk Shift")
+        if has_drg and has_period:
+            drg = dfp.groupby(["period", "drg_group"])["UPI"].mean().reset_index()
+            st.plotly_chart(px.line(drg, x="period", y="UPI", color="drg_group", markers=True, template="plotly_white"))
         else:
-            # KPIs for provider
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Patients (provider)", len(df_p))
-            c2.metric("High-Risk (provider)", int((df_p["risk_level"] == "High Risk").sum()))
-            c3.metric("Average UPI (provider)", f"{df_p['UPI'].mean():.1f}")
+            st.info("Need drg_group + period")
 
-            st.markdown("---")
-
-            # 1) Risk Composition (BAS+CRS+... for this provider)
-            st.markdown("### 1) Risk Composition (scores for this provider)")
-            comp = (
-                df_p[["BAS", "CRS", "CARS", "PCS", "PPS", "FEI"]]
-                .mean()
-                .reset_index()
-            )
-            comp.columns = ["Score", "Value"]
-            fig_comp = px.bar(
-                comp,
-                x="Score",
-                y="Value",
-                title="Average Score Composition – Current Provider",
-                template="plotly_white",
-            )
-            st.plotly_chart(fig_comp, use_container_width=True)
-
-            # 2) UPI vs Network Average (simple comparison)
-            st.markdown("### 2) UPI vs Network Average")
-            net_avg_upi = data["UPI"].mean()
-            prov_avg_upi = df_p["UPI"].mean()
-            c4, c5 = st.columns(2)
-            c4.metric("Provider Avg UPI", f"{prov_avg_upi:.1f}")
-            c5.metric("Network Avg UPI", f"{net_avg_upi:.1f}")
-
-            # 3) DRG Risk Shift (Monthly) – if drg_group+period exist
-            st.markdown("### 3) DRG Risk Shift (Monthly)")
-
-            if has_drg and has_period:
-                drg_shift = (
-                    df_p.groupby(["period", "drg_group"])["UPI"]
-                    .mean()
-                    .reset_index()
-                    .sort_values(["period", "drg_group"])
-                )
-                fig_drg = px.line(
-                    drg_shift,
-                    x="period",
-                    y="UPI",
-                    color="drg_group",
-                    markers=True,
-                    title="Average UPI by DRG over time (this provider)",
-                    template="plotly_white",
-                )
-                st.plotly_chart(fig_drg, use_container_width=True)
-                st.dataframe(drg_shift, use_container_width=True)
-            else:
-                st.info("To enable DRG Risk Shift, add 'drg_group' and 'period' columns.")
-
-            # 4) Provider Compliance Score – PCS Trend
-            st.markdown("### 4) Provider Compliance Score – PCS Trend")
-            if has_period:
-                pcs_trend = (
-                    df_p.groupby("period")["PCS"]
-                    .mean()
-                    .reset_index()
-                    .sort_values("period")
-                )
-                fig_pcs = px.line(
-                    pcs_trend,
-                    x="period",
-                    y="PCS",
-                    markers=True,
-                    title="PCS Trend for this provider (documentation/compliance)",
-                    template="plotly_white",
-                )
-                st.plotly_chart(fig_pcs, use_container_width=True)
-                st.dataframe(pcs_trend, use_container_width=True)
-            else:
-                st.info("No 'period' column found – cannot show PCS trend.")
+        # PCS Trend
+        st.markdown("### PCS Trend")
+        if has_period:
+            pcs = dfp.groupby("period")["PCS"].mean().reset_index()
+            st.plotly_chart(px.line(pcs, x="period", y="PCS", markers=True, template="plotly_white"))
+        else:
+            st.info("Need 'period'")
 
 
 # ---------------------------------------------------------
-# LEVEL 3 – PATIENT RISK PANEL
+# LEVEL 3 – PATIENT PANEL
 # ---------------------------------------------------------
 with tab_patient:
     st.subheader("Level 3 – Patient Risk Panel")
 
-    patients = sorted(data["patient_id"].dropna().unique())
-    selected_patient = st.selectbox("Select patient", patients)
+    pts = sorted(data["patient_id"].unique())
+    selected_pt = st.selectbox("Select patient", pts)
 
+    df_pt = data[data["patient_id"] == selected_pt]
     if has_period:
-        df_pt = data[data["patient_id"] == selected_patient].copy().sort_values("period")
-    else:
-        df_pt = data[data["patient_id"] == selected_patient].copy()
+        df_pt = df_pt.sort_values("period")
 
-    if df_pt.empty:
-        st.warning("No records found for this patient.")
-    else:
-        latest = df_pt.iloc[-1]
+    latest = df_pt.iloc[-1]
 
-        # UPI gauge (رقم + مستوى)
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Current UPI", f"{latest['UPI']:.1f}")
-        c2.metric("Risk Level", latest["risk_level"])
-        if has_provider_name:
-            c3.metric("Current Provider", str(latest["provider_name"]))
+    c1, c2, c3 = st.columns(3)
+    c1.metric("UPI", f"{latest['UPI']:.1f}")
+    c2.metric("Risk Level", latest["risk_level"])
+    c3.metric("Provider", latest["provider_name"] if has_provider else "N/A")
+
+    st.markdown("---")
+
+    drivers = pd.DataFrame({
+        "Score": ["BAS", "CRS", "CARS", "PCS", "PPS", "FEI"],
+        "Value": [
+            latest["BAS"], latest["CRS"], latest["CARS"],
+            latest["PCS"], latest["PPS"], latest["FEI"]
+        ]
+    })
+    st.plotly_chart(px.bar(drivers, x="Score", y="Value", template="plotly_white"))
+
+    c4, c5 = st.columns(2)
+    c4.metric("PCS", f"{latest['PCS']:.1f}")
+    c5.metric("Provider Penalty", f"{latest['provider_penalty']:.1f}")
+
+    st.markdown("### Last 3 periods")
+    if has_period and len(df_pt) >= 3:
+        last3 = df_pt.tail(3)
+        st.plotly_chart(px.line(last3, x="period", y="UPI", markers=True, template="plotly_white"))
+    else:
+        st.info("Not enough period history")
+
+
+# ---------------------------------------------------------
+# MODEL GOVERNANCE / LOGS
+# ---------------------------------------------------------
+with tab_logs:
+    st.subheader("Model Governance – Run Logs")
+
+    if not os.path.isfile(LOG_FILE):
+        st.info("No logs found. Go to Level 1 and click 'Log this run' at least once.")
+    else:
+        logs = pd.read_csv(LOG_FILE)
+
+        # تحويل timestamp لنوع تاريخ/وقت
+        if "timestamp" in logs.columns:
+            logs["timestamp"] = pd.to_datetime(logs["timestamp"], errors="coerce")
+
+        logs = logs.sort_values("timestamp")
+
+        # ---- أدوات أعلى التبويب: Download + Clear (Admin) ----
+        top_col1, top_col2 = st.columns(2)
+
+        # زر تحميل كل الـ logs كـ CSV
+        csv_buf = io.StringIO()
+        logs.to_csv(csv_buf, index=False)
+        top_col1.download_button(
+            "Download full log (CSV)",
+            data=csv_buf.getvalue(),
+            file_name="upi_runs_log.csv",
+            mime="text/csv",
+        )
+
+        # زر مسح الـ logs (Admin فقط)
+        if IS_ADMIN:
+            if top_col2.button("Clear all logs (Admin only)"):
+                os.remove(LOG_FILE)
+                st.warning("All logs have been cleared. New runs will create a fresh log file.")
+                st.stop()
         else:
-            c3.metric("Current Provider", "N/A")
+            top_col2.caption("Clear logs: Admin only")
 
         st.markdown("---")
 
-        # 2) Risk Drivers (BAS/CRS/CARS/PCS/PPS/FEI)
-        st.markdown("### 2) Risk Drivers (latest record)")
+        # ---- KPIs عامة عن الـ runs ----
+        n_runs = len(logs)
+        last_ts = logs["timestamp"].max() if "timestamp" in logs.columns else None
+        last_avg = float(logs["avg_upi"].iloc[-1]) if "avg_upi" in logs.columns else None
 
-        drivers = pd.DataFrame(
-            {
-                "Score": ["BAS", "CRS", "CARS", "PCS", "PPS", "FEI"],
-                "Value": [
-                    latest["BAS"],
-                    latest["CRS"],
-                    latest["CARS"],
-                    latest["PCS"],
-                    latest["PPS"],
-                    latest["FEI"],
-                ],
-            }
-        )
-        fig_drv = px.bar(
-            drivers,
-            x="Score",
-            y="Value",
-            title="Risk Components for this patient",
-            template="plotly_white",
-        )
-        st.plotly_chart(fig_drv, use_container_width=True)
-        st.dataframe(drivers, use_container_width=True)
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Total Logged Runs", n_runs)
+        c2.metric("Last Run Time", str(last_ts) if last_ts is not None else "N/A")
+        c3.metric("Last Avg UPI", f"{last_avg:.2f}" if last_avg is not None else "N/A")
 
-        # 3) Influence of Provider (PCS / provider_penalty)
-        st.markdown("### 3) Influence of Provider (PCS & Penalty)")
-        c4, c5 = st.columns(2)
-        c4.metric("PCS (documentation/compliance)", f"{latest['PCS']:.1f}")
-        c5.metric("Provider penalty", f"{latest['provider_penalty']:.1f}")
+        st.markdown("---")
 
-        # 4) Early Risk Movement (last 3 periods)
-        st.markdown("### 4) Early Risk Movement (last 3 periods)")
-        if has_period and len(df_pt) > 1:
-            last3 = df_pt.tail(3)
-            fig_sp = px.line(
-                last3,
-                x="period",
-                y="UPI",
+        # 1) Avg UPI trend عبر الزمن
+        if {"timestamp", "avg_upi"}.issubset(logs.columns):
+            st.markdown("### 1) Average UPI across runs")
+            fig_log_upi = px.line(
+                logs,
+                x="timestamp",
+                y="avg_upi",
                 markers=True,
-                title="UPI – last 3 periods",
+                title="Average UPI per logged run",
                 template="plotly_white",
             )
-            st.plotly_chart(fig_sp, use_container_width=True)
-            st.dataframe(last3[["period", "UPI", "risk_level"]], use_container_width=True)
+            st.plotly_chart(fig_log_upi, use_container_width=True)
         else:
-            st.info("Not enough period data to show last-3-period movement.")
+            st.info("Missing 'timestamp' or 'avg_upi' in logs – cannot plot UPI trend.")
+
+        # 2) High-Risk % trend
+        if {"timestamp", "high_risk_pct"}.issubset(logs.columns):
+            st.markdown("### 2) High-Risk % across runs")
+            fig_log_hr = px.line(
+                logs,
+                x="timestamp",
+                y="high_risk_pct",
+                markers=True,
+                title="High-Risk % per logged run",
+                template="plotly_white",
+            )
+            st.plotly_chart(fig_log_hr, use_container_width=True)
+        else:
+            st.info("Missing 'high_risk_pct' in logs – cannot plot High-Risk % trend.")
+
+        # 3) Normalization methods المستخدمة
+        if "norm_method" in logs.columns:
+            st.markdown("### 3) Normalization methods used")
+            fig_norm = px.histogram(
+                logs,
+                x="norm_method",
+                title="Runs count by normalization method",
+                template="plotly_white",
+            )
+            st.plotly_chart(fig_norm, use_container_width=True)
+
+        # 4) Model versions المستخدمة
+        if "model_version" in logs.columns:
+            st.markdown("### 4) Model versions used")
+            fig_mv = px.histogram(
+                logs,
+                x="model_version",
+                title="Runs count by model version",
+                template="plotly_white",
+            )
+            st.plotly_chart(fig_mv, use_container_width=True)
+
+        # 5) جدول آخر 20 Run
+        st.markdown("### 5) Latest 20 logged runs")
+        st.dataframe(
+            logs.sort_values("timestamp", ascending=False).head(20),
+            use_container_width=True,
+        )
+
 
 
 # =========================================================
@@ -484,5 +475,5 @@ st.markdown(
     "<p style='text-align:center; color:#1f77b4; font-size:16px;'>Developed by <b>Mudather</b></p>",
     unsafe_allow_html=True,
 )
-st.caption("Model v2.0 • " + dt.datetime.now().strftime("%Y-%m-%d"))
+st.caption("Model " + MODEL_VERSION + " • " + dt.datetime.now().strftime("%Y-%m-%d"))
 
