@@ -25,17 +25,18 @@ ADMIN_KEY = get_admin_key()
 MODEL_VERSION = "v2.6-MVP-DRG-UI"
 
 st.set_page_config(
-    page_title="Clinical–Actuarial UPI Dashboard",
+    page_title="Clinical–Actuarial Risk Intelligence Dashboard – UPI & DRG Variance",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 # =====================================================================
-# CUSTOM UI STYLE (COLORS & CARDS)
+# CUSTOM UI STYLE (COLORS & CARDS – Bupa-inspired)
 # =====================================================================
 
-# ألوان الهوية (أزرق حديث + سماوي + خلفية فاتحة جداً)
+# ألوان الهوية (أزرق تأميني + سماوي + خلفية فاتحة جداً)
 PRIMARY_COLOR = "#0096D6"   # أزرق رئيسي
+PRIMARY_DARK = "#005B9A"    # أزرق أغمق للتدرّج
 ACCENT_COLOR = "#5BC2E7"    # سماوي فاتح
 BG_COLOR = "#f4f9fc"        # خلفية فاتحة مائلة للأزرق
 
@@ -48,10 +49,36 @@ body {{
     font-family: "Cairo", "Segoe UI", sans-serif;
 }}
 
-/* عنوان الصفحة */
-h1 {{
-    color: {PRIMARY_COLOR};
+/* شريط علوي يشبه واجهات شركات التأمين */
+.top-bar {{
+    background: linear-gradient(90deg, {PRIMARY_COLOR}, {PRIMARY_DARK});
+    padding: 18px 26px;
+    border-radius: 0 0 18px 18px;
+    color: #ffffff;
+    margin-bottom: 22px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.18);
+}}
+.top-bar-title {{
+    font-size: 26px;
     font-weight: 700;
+    margin-bottom: 2px;
+}}
+.top-bar-sub {{
+    font-size: 13px;
+    opacity: 0.92;
+}}
+.top-bar-pill {{
+    float: right;
+    background-color: rgba(255,255,255,0.12);
+    border-radius: 999px;
+    padding: 4px 14px;
+    font-size: 12px;
+    margin-top: -24px;
+}}
+
+/* عناوين داخلية */
+h2, h3, h4 {{
+    color: {PRIMARY_DARK};
 }}
 
 /* صندوق KPI */
@@ -78,18 +105,18 @@ h1 {{
     font-size: 14px;
 }}
 
-/* نسخة خاصة للأرقام المالية أو المتوسطات */
+/* نسخة خاصة للأرقام أو المعلومات الثانوية */
 .card-accent {{
     border-top: 4px solid {ACCENT_COLOR};
 }}
 
 .card-small-number {{
-    font-size: 20px;
+    font-size: 18px;
     color: {ACCENT_COLOR};
     font-weight: 600;
 }}
 
-/* ترويسة التبويبات */
+/* Tabs */
 div.stTabs [data-baseweb="tab"] {{
     font-size: 16px;
     padding: 10px 18px;
@@ -101,19 +128,36 @@ div.stTabs [data-baseweb="tab"] {{
     color: #777777;
     padding-top: 24px;
     padding-bottom: 8px;
-    font-size: 14px;
+    font-size: 13px;
 }}
 
 </style>
 """
 st.markdown(custom_css, unsafe_allow_html=True)
 
-# عنوان رئيسي + تنبيه
-st.title("Clinical–Actuarial Scoring & Risk Dashboard (UPI + DRG variance)")
+# شريط علوي (Top Bar) بالعنوان الاحترافي الجديد
+top_bar_html = f"""
+<div class="top-bar">
+  <div class="top-bar-title">Clinical–Actuarial Risk Intelligence Dashboard</div>
+  <div class="top-bar-sub">
+    UPI &amp; DRG Variance • Unified Patient &amp; Provider Risk • MVP – Internal Demo
+  </div>
+  <div class="top-bar-pill">
+    Experimental • {MODEL_VERSION}
+  </div>
+</div>
+"""
+st.markdown(top_bar_html, unsafe_allow_html=True)
+
+# تنبيه عام
 st.info(
     "⚠️ هذا نموذج تجريبي (MVP) يعتمد على بيانات محاكاة أو بيانات أولية — "
     "الغرض منه عرض الفكرة والتحليل، وليس إصدار قرارات نهائية."
 )
+
+# =====================================================================
+# ADMIN INPUT
+# =====================================================================
 
 admin_input = st.sidebar.text_input("Admin key (optional)", type="password")
 IS_ADMIN = ADMIN_KEY != "" and admin_input == ADMIN_KEY
@@ -383,7 +427,7 @@ tab1, tab2, tab3, tab_drg, tab_val, tab_logs, tab_sim = st.tabs(
 )
 
 # ---------------------------------------------------------------------
-# LEVEL 1 – STRATEGIC (مع تصميم Cards)
+# LEVEL 1 – STRATEGIC
 # ---------------------------------------------------------------------
 with tab1:
     st.subheader("Level 1 – Strategic Executive Dashboard")
