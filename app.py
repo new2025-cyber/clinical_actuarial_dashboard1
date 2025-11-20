@@ -22,7 +22,7 @@ def get_admin_key() -> str:
 
 
 ADMIN_KEY = get_admin_key()
-MODEL_VERSION = "v2.5-DRG-Timeline"
+MODEL_VERSION = "v2.6-MVP-DRG-UI"
 
 st.set_page_config(
     page_title="Clinical–Actuarial UPI Dashboard",
@@ -30,7 +30,90 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# =====================================================================
+# CUSTOM UI STYLE (COLORS & CARDS)
+# =====================================================================
+
+# ألوان الهوية (أزرق حديث + سماوي + خلفية فاتحة جداً)
+PRIMARY_COLOR = "#0096D6"   # أزرق رئيسي
+ACCENT_COLOR = "#5BC2E7"    # سماوي فاتح
+BG_COLOR = "#f4f9fc"        # خلفية فاتحة مائلة للأزرق
+
+custom_css = f"""
+<style>
+
+/* خلفية عامة */
+body {{
+    background-color: {BG_COLOR};
+    font-family: "Cairo", "Segoe UI", sans-serif;
+}}
+
+/* عنوان الصفحة */
+h1 {{
+    color: {PRIMARY_COLOR};
+    font-weight: 700;
+}}
+
+/* صندوق KPI */
+.card {{
+    background-color: #ffffff;
+    padding: 18px 20px;
+    border-radius: 14px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.06);
+    text-align: center;
+    margin-bottom: 16px;
+    border-top: 4px solid {PRIMARY_COLOR};
+}}
+
+.card h2 {{
+    font-size: 30px;
+    color: {PRIMARY_COLOR};
+    margin-bottom: 4px;
+    margin-top: 0px;
+}}
+
+.card p {{
+    color: #555555;
+    margin-top: 0;
+    font-size: 14px;
+}}
+
+/* نسخة خاصة للأرقام المالية أو المتوسطات */
+.card-accent {{
+    border-top: 4px solid {ACCENT_COLOR};
+}}
+
+.card-small-number {{
+    font-size: 20px;
+    color: {ACCENT_COLOR};
+    font-weight: 600;
+}}
+
+/* ترويسة التبويبات */
+div.stTabs [data-baseweb="tab"] {{
+    font-size: 16px;
+    padding: 10px 18px;
+}}
+
+/* Footer */
+.footer {{
+    text-align: center;
+    color: #777777;
+    padding-top: 24px;
+    padding-bottom: 8px;
+    font-size: 14px;
+}}
+
+</style>
+"""
+st.markdown(custom_css, unsafe_allow_html=True)
+
+# عنوان رئيسي + تنبيه
 st.title("Clinical–Actuarial Scoring & Risk Dashboard (UPI + DRG variance)")
+st.info(
+    "⚠️ هذا نموذج تجريبي (MVP) يعتمد على بيانات محاكاة أو بيانات أولية — "
+    "الغرض منه عرض الفكرة والتحليل، وليس إصدار قرارات نهائية."
+)
 
 admin_input = st.sidebar.text_input("Admin key (optional)", type="password")
 IS_ADMIN = ADMIN_KEY != "" and admin_input == ADMIN_KEY
@@ -218,6 +301,13 @@ data["provider_penalty"] = data.apply(calc_provider_penalty, axis=1)
 data["UPI"] = data.apply(calc_upi, axis=1)
 data["risk_level"] = data["UPI"].apply(classify_risk)
 
+# أرقام أساسية (Level 1 + الكروت)
+total_patients = len(data)
+num_high = int((data["risk_level"] == "High Risk").sum())
+num_med = int((data["risk_level"] == "Medium Risk").sum())
+num_low = int((data["risk_level"] == "Low Risk").sum())
+avg_upi = float(data["UPI"].mean()) if total_patients > 0 else 0.0
+
 # =====================================================================
 # LOGGING
 # =====================================================================
@@ -234,9 +324,12 @@ def log_run(df: pd.DataFrame, ds_name: str) -> None:
     total = len(df)
     high = int((df["risk_level"] == "High Risk").sum())
     pct = (100.0 * high / total) if total > 0 else 0.0
-    avg_upi = float(df["UPI"].mean()) if total > 0 else 0.0
+    avg_upi_local = float(df["UPI"].mean()) if total > 0 else 0.0
 
-    weights = f"BAS={wBAS:.2f};CRS={wCRS:.2f};CARS={wCARS:.2f};PEN={wPEN:.2f};FEI={wFEI:.2f}"
+    weights = (
+        f"BAS={wBAS:.2f};CRS={wCRS:.2f};CARS={wCARS:.2f};"
+        f"PEN={wPEN:.2f};FEI={wFEI:.2f}"
+    )
     thresholds = f"high={high_thr};medium={med_thr}"
 
     header = [
@@ -259,7 +352,7 @@ def log_run(df: pd.DataFrame, ds_name: str) -> None:
         total,
         high,
         f"{pct:.2f}",
-        f"{avg_upi:.2f}",
+        f"{avg_upi_local:.2f}",
         norm_method,
         weights,
         thresholds,
@@ -290,16 +383,47 @@ tab1, tab2, tab3, tab_drg, tab_val, tab_logs, tab_sim = st.tabs(
 )
 
 # ---------------------------------------------------------------------
-# LEVEL 1 – STRATEGIC
+# LEVEL 1 – STRATEGIC (مع تصميم Cards)
 # ---------------------------------------------------------------------
 with tab1:
     st.subheader("Level 1 – Strategic Executive Dashboard")
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Total patients", len(data))
-    c2.metric("High-risk patients", int((data["risk_level"] == "High Risk").sum()))
-    c3.metric("Average UPI", f"{float(data['UPI'].mean()):.1f}")
+    # بطاقات KPI
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.markdown(
+            f"<div class='card'>"
+            f"<h2>{total_patients}</h2>"
+            f"<p>Total patients</p>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+    with c2:
+        st.markdown(
+            f"<div class='card'>"
+            f"<h2 style='color:#d62728;'>{num_high}</h2>"
+            f"<p>High Risk</p>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+    with c3:
+        st.markdown(
+            f"<div class='card'>"
+            f"<h2>{avg_upi:.1f}</h2>"
+            f"<p>Average UPI</p>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+    with c4:
+        st.markdown(
+            f"<div class='card card-accent'>"
+            f"<h2 class='card-small-number'>{norm_method}</h2>"
+            f"<p>Normalization method</p>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
 
+    # زر تسجيل التشغيل في اللوج
     if st.button("Log this run (append to logs/upi_runs_log.csv)"):
         log_run(data, dataset_name)
         st.success("Run logged successfully.")
@@ -356,6 +480,8 @@ with tab1:
             y="UPI",
             title="Average UPI by region",
             labels={"region": "Region", "UPI": "Avg UPI"},
+            color="UPI",
+            color_continuous_scale="Viridis",
         )
         st.plotly_chart(fig_reg, use_container_width=True)
     else:
@@ -375,6 +501,8 @@ with tab1:
         y="UPI",
         title="Top 10 providers by Avg UPI",
         labels={"provider_name": "Provider", "UPI": "Avg UPI"},
+        color="UPI",
+        color_continuous_scale="Plasma",
     )
     st.plotly_chart(fig_prov, use_container_width=True)
     st.dataframe(prov, use_container_width=True)
@@ -406,13 +534,15 @@ with tab2:
         y="Value",
         title=f"Risk composition – {selected_provider}",
         labels={"Score": "Component", "Value": "Mean value"},
+        color="Value",
+        color_continuous_scale="Tealgrn",
     )
     st.plotly_chart(fig_comp, use_container_width=True)
 
     st.markdown("### Provider vs Network average UPI")
     col_a, col_b = st.columns(2)
     col_a.metric("Provider Avg UPI", f"{float(d['UPI'].mean()):.1f}")
-    col_b.metric("Network Avg UPI", f"{float(data['UPI'].mean()):.1f}")
+    col_b.metric("Network Avg UPI", f"{avg_upi:.1f}")
 
     st.markdown("### DRG risk trend for this provider")
     drg_trend = (
@@ -491,6 +621,8 @@ with tab3:
         y="Value",
         title="Risk drivers (latest)",
         labels={"Score": "Component", "Value": "Score value"},
+        color="Value",
+        color_continuous_scale="Sunset",
     )
     st.plotly_chart(fig_drv, use_container_width=True)
 
@@ -583,6 +715,8 @@ with tab_drg:
         y="UPI",
         title="Average UPI by DRG (network)",
         labels={"drg_group": "DRG", "UPI": "Avg UPI"},
+        color="UPI",
+        color_continuous_scale="Inferno",
     )
     st.plotly_chart(fig_drg_rank, use_container_width=True)
     st.dataframe(drg_rank, use_container_width=True)
@@ -600,6 +734,8 @@ with tab_drg:
         y="drg_variance",
         title="Average DRG variance by DRG (network)",
         labels={"drg_group": "DRG", "drg_variance": "Avg DRG variance (%)"},
+        color="drg_variance",
+        color_continuous_scale="Magma",
     )
     st.plotly_chart(fig_drg_var, use_container_width=True)
     st.dataframe(drg_var_rank, use_container_width=True)
@@ -640,6 +776,8 @@ with tab_drg:
         y="UPI",
         title=f"Average UPI by DRG – {selected_provider2}",
         labels={"drg_group": "DRG", "UPI": "Avg UPI"},
+        color="UPI",
+        color_continuous_scale="Plasma",
     )
     st.plotly_chart(fig_drg_prov, use_container_width=True)
     st.dataframe(drg_prov, use_container_width=True)
@@ -898,10 +1036,9 @@ with tab_sim:
 # =====================================================================
 # FOOTER SIGNATURE
 # =====================================================================
-st.markdown("---")
 st.markdown(
-    "<p style='text-align:center; color:#1f77b4; font-size:16px;'>Developed by "
-    "<b>Mudather</b></p>",
+    f"<div class='footer'>Developed by <b>Mudather</b> • {MODEL_VERSION} • "
+    + pd.Timestamp.today().strftime("%Y-%m-%d")
+    + "</div>",
     unsafe_allow_html=True,
 )
-st.caption("Model " + MODEL_VERSION + " • " + pd.Timestamp.today().strftime("%Y-%m-%d"))
