@@ -168,10 +168,11 @@ else:
     st.sidebar.caption("Public mode – admin features disabled")
 
 # =====================================================================
-# FILE UPLOAD
+# FILE UPLOAD + DATA SECTION TITLE
 # =====================================================================
 
-st.markdown("### 1) Upload Patient-Level Dataset")
+st.markdown("### Data & Model Configuration")
+st.markdown("#### 1) Upload Patient-Level Dataset")
 
 uploaded = st.file_uploader("Upload CSV or Excel file", type=["csv", "xlsx"])
 
