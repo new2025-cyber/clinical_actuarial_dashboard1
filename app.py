@@ -1,5 +1,4 @@
 import os
-import io
 import csv
 import datetime as dt
 
@@ -22,7 +21,7 @@ def get_admin_key() -> str:
 
 
 ADMIN_KEY = get_admin_key()
-MODEL_VERSION = "v2.6-MVP-DRG-UI"
+MODEL_VERSION = "v3.0-MVP-DRG-UI"
 
 st.set_page_config(
     page_title="Clinical–Actuarial Risk Intelligence Dashboard – UPI & DRG Variance",
@@ -34,22 +33,19 @@ st.set_page_config(
 # CUSTOM UI STYLE (COLORS & CARDS – Bupa-inspired)
 # =====================================================================
 
-# ألوان الهوية (أزرق تأميني + سماوي + خلفية فاتحة جداً)
-PRIMARY_COLOR = "#0096D6"   # أزرق رئيسي
-PRIMARY_DARK = "#005B9A"    # أزرق أغمق للتدرّج
-ACCENT_COLOR = "#5BC2E7"    # سماوي فاتح
-BG_COLOR = "#f4f9fc"        # خلفية فاتحة مائلة للأزرق
+PRIMARY_COLOR = "#0096D6"   # main blue
+PRIMARY_DARK = "#005B9A"    # darker blue
+ACCENT_COLOR = "#5BC2E7"    # light cyan
+BG_COLOR = "#f4f9fc"        # very light blue background
 
 custom_css = f"""
 <style>
 
-/* خلفية عامة */
 body {{
     background-color: {BG_COLOR};
     font-family: "Cairo", "Segoe UI", sans-serif;
 }}
 
-/* شريط علوي يشبه واجهات شركات التأمين */
 .top-bar {{
     background: linear-gradient(90deg, {PRIMARY_COLOR}, {PRIMARY_DARK});
     padding: 18px 26px;
@@ -76,12 +72,10 @@ body {{
     margin-top: -24px;
 }}
 
-/* عناوين داخلية */
 h2, h3, h4 {{
     color: {PRIMARY_DARK};
 }}
 
-/* صندوق KPI */
 .card {{
     background-color: #ffffff;
     padding: 18px 20px;
@@ -105,7 +99,6 @@ h2, h3, h4 {{
     font-size: 14px;
 }}
 
-/* نسخة خاصة للأرقام أو المعلومات الثانوية */
 .card-accent {{
     border-top: 4px solid {ACCENT_COLOR};
 }}
@@ -116,13 +109,11 @@ h2, h3, h4 {{
     font-weight: 600;
 }}
 
-/* Tabs */
 div.stTabs [data-baseweb="tab"] {{
-    font-size: 16px;
-    padding: 10px 18px;
+    font-size: 15px;
+    padding: 8px 14px;
 }}
 
-/* Footer */
 .footer {{
     text-align: center;
     color: #777777;
@@ -135,7 +126,6 @@ div.stTabs [data-baseweb="tab"] {{
 """
 st.markdown(custom_css, unsafe_allow_html=True)
 
-# شريط علوي (Top Bar) بالعنوان الاحترافي الجديد
 top_bar_html = f"""
 <div class="top-bar">
   <div class="top-bar-title">Clinical–Actuarial Risk Intelligence Dashboard</div>
@@ -149,10 +139,9 @@ top_bar_html = f"""
 """
 st.markdown(top_bar_html, unsafe_allow_html=True)
 
-# تنبيه عام
 st.info(
-    "⚠️ هذا نموذج تجريبي (MVP) يعتمد على بيانات محاكاة أو بيانات أولية — "
-    "الغرض منه عرض الفكرة والتحليل، وليس إصدار قرارات نهائية."
+    "⚠️ This is an internal MVP prototype based on mock or preliminary data – "
+    "intended for concept demonstration, not for final decision-making."
 )
 
 # =====================================================================
@@ -168,7 +157,7 @@ else:
     st.sidebar.caption("Public mode – admin features disabled")
 
 # =====================================================================
-# FILE UPLOAD + DATA SECTION TITLE
+# DATA & MODEL CONFIGURATION
 # =====================================================================
 
 st.markdown("### Data & Model Configuration")
@@ -188,10 +177,6 @@ if ext == "csv":
 else:
     data = pd.read_excel(uploaded)
 
-# ---------------------------------------------------------------------
-# REQUIRED / OPTIONAL COLUMNS
-# ---------------------------------------------------------------------
-
 required_base = [
     "patient_id",
     "BAS",
@@ -202,7 +187,7 @@ required_base = [
     "claims_amount",
     "provider_name",
     "drg_group",
-    "period",  # شهر/ربع/سنة
+    "period",
 ]
 
 missing_base = [c for c in required_base if c not in data.columns]
@@ -210,7 +195,6 @@ if missing_base:
     st.error(f"Missing required columns: {missing_base}")
     st.stop()
 
-# expected_cost يمكن أن يكون بأحد اسمين
 if "expected_cost" in data.columns:
     expected_col = "expected_cost"
 elif "drg_expected_cost" in data.columns:
@@ -236,7 +220,6 @@ norm_method = st.sidebar.selectbox(
 
 
 def normalize(series: pd.Series) -> pd.Series:
-    """Normalize numeric series according to selected method."""
     s = pd.to_numeric(series, errors="coerce")
     if norm_method == "None":
         return s
@@ -271,7 +254,6 @@ med_thr = st.sidebar.slider("Medium risk ≥", 40, 89, 60)
 
 
 def compute_drg_variance(df: pd.DataFrame, claims_col: str, exp_col: str) -> pd.DataFrame:
-    """Compute DRG variance = (claims - expected) / expected * 100."""
     out = df.copy()
     claims = pd.to_numeric(out[claims_col], errors="coerce")
     expected = pd.to_numeric(out[exp_col], errors="coerce")
@@ -300,18 +282,10 @@ def compute_cars(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-# ---------------------------------------------------------------------
-# APPLY PIPELINE
-# ---------------------------------------------------------------------
-
-# 1) Normalize base scores
 for col in ["BAS", "CRS", "PCS", "PPS", "FEI"]:
     data[col] = normalize(data[col])
 
-# 2) Compute DRG variance
 data = compute_drg_variance(data, "claims_amount", expected_col)
-
-# 3) Compute CARS using CRS + PCS + DRG variance
 data = compute_cars(data)
 data["CARS"] = normalize(data["CARS"])
 
@@ -346,7 +320,6 @@ data["provider_penalty"] = data.apply(calc_provider_penalty, axis=1)
 data["UPI"] = data.apply(calc_upi, axis=1)
 data["risk_level"] = data["UPI"].apply(classify_risk)
 
-# أرقام أساسية (Level 1 + الكروت)
 total_patients = len(data)
 num_high = int((data["risk_level"] == "High Risk").sum())
 num_med = int((data["risk_level"] == "Medium Risk").sum())
@@ -362,7 +335,6 @@ LOG_FILE = os.path.join(LOG_DIR, "upi_runs_log.csv")
 
 
 def log_run(df: pd.DataFrame, ds_name: str) -> None:
-    """Append summary of a run to CSV log."""
     os.makedirs(LOG_DIR, exist_ok=True)
 
     now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -412,223 +384,267 @@ def log_run(df: pd.DataFrame, ds_name: str) -> None:
 
 
 # =====================================================================
-# TABS
+# VIEW MODE SELECTOR (RADIO INSTEAD OF MANY TABS)
 # =====================================================================
 
-tab1, tab2, tab3, tab_drg, tab_val, tab_logs, tab_sim = st.tabs(
-    [
-        "Level 1 – Strategic Executive Dashboard",
-        "Level 2 – Facility Performance",
-        "Level 3 – Patient Risk Panel",
-        "DRG-Level Risk Comparison",
-        "Model Validation Lab",
-        "Model Governance / Logs",
-        "Business Impact Simulator",
-    ]
+st.markdown("### View Mode")
+
+mode = st.radio(
+    "Select view",
+    ["Executive Overview", "Provider / Network", "Patient Panel"],
+    horizontal=True,
 )
 
-# ---------------------------------------------------------------------
-# LEVEL 1 – STRATEGIC
-# ---------------------------------------------------------------------
-with tab1:
-    st.subheader("Level 1 – Strategic Executive Dashboard")
+st.markdown("---")
 
-    # بطاقات KPI
+# =====================================================================
+# EXECUTIVE OVERVIEW
+# =====================================================================
+
+if mode == "Executive Overview":
+    st.subheader("Executive Overview – Portfolio Risk & Financial Link")
+
+    # KPI cards
     c1, c2, c3, c4 = st.columns(4)
     with c1:
         st.markdown(
-            f"<div class='card'>"
-            f"<h2>{total_patients}</h2>"
-            f"<p>Total patients</p>"
-            f"</div>",
+            f"<div class='card'><h2>{total_patients}</h2><p>Total patients</p></div>",
             unsafe_allow_html=True,
         )
     with c2:
         st.markdown(
-            f"<div class='card'>"
-            f"<h2 style='color:#d62728;'>{num_high}</h2>"
-            f"<p>High Risk</p>"
-            f"</div>",
+            f"<div class='card'><h2 style='color:#d62728;'>{num_high}</h2><p>High Risk</p></div>",
             unsafe_allow_html=True,
         )
     with c3:
         st.markdown(
-            f"<div class='card'>"
-            f"<h2>{avg_upi:.1f}</h2>"
-            f"<p>Average UPI</p>"
-            f"</div>",
+            f"<div class='card'><h2>{avg_upi:.1f}</h2><p>Average UPI</p></div>",
             unsafe_allow_html=True,
         )
     with c4:
         st.markdown(
             f"<div class='card card-accent'>"
             f"<h2 class='card-small-number'>{norm_method}</h2>"
-            f"<p>Normalization method</p>"
-            f"</div>",
+            f"<p>Normalization</p></div>",
             unsafe_allow_html=True,
         )
 
-    # زر تسجيل التشغيل في اللوج
+    # Logging button
     if st.button("Log this run (append to logs/upi_runs_log.csv)"):
         log_run(data, dataset_name)
         st.success("Run logged successfully.")
 
-    st.markdown("---")
+    st.markdown("#### Portfolio Charts")
 
-    st.markdown("### UPI Trend over time")
-    trend = (
-        data.groupby("period")["UPI"]
-        .mean()
-        .reset_index()
-        .sort_values("period")
-    )
-    fig_trend = px.line(
-        trend,
-        x="period",
-        y="UPI",
-        markers=True,
-        title="Average UPI by period",
-        labels={"period": "Period", "UPI": "Avg UPI"},
-    )
-    st.plotly_chart(fig_trend, use_container_width=True)
+    # Row 1: UPI trend + Loss ratio vs UPI
+    row1_col1, row1_col2 = st.columns(2)
 
-    st.markdown("### Loss ratio vs UPI (if premium available)")
-    if has_premium:
-        tmp = (
-            data.groupby("period")
-            .agg(
-                avg_upi=("UPI", "mean"),
-                claims=("claims_amount", "sum"),
-                premium=("premium_amount", "sum"),
-            )
+    with row1_col1:
+        trend = (
+            data.groupby("period")["UPI"]
+            .mean()
             .reset_index()
+            .sort_values("period")
         )
-        tmp["loss_ratio"] = 100.0 * tmp["claims"] / (tmp["premium"] + 1e-9)
-        fig_lr = px.line(
-            tmp,
+        fig_trend = px.line(
+            trend,
             x="period",
-            y=["avg_upi", "loss_ratio"],
-            markers=True,
-            title="Average UPI vs Loss Ratio",
-            labels={"value": "Value", "period": "Period", "variable": "Metric"},
-        )
-        st.plotly_chart(fig_lr, use_container_width=True)
-    else:
-        st.info("Column 'premium_amount' not found – loss ratio cannot be computed.")
-
-    st.markdown("### Average UPI by region")
-    if has_region:
-        reg = data.groupby("region")["UPI"].mean().reset_index()
-        fig_reg = px.bar(
-            reg,
-            x="region",
             y="UPI",
-            title="Average UPI by region",
-            labels={"region": "Region", "UPI": "Avg UPI"},
-            color="UPI",
-            color_continuous_scale="Viridis",
+            markers=True,
+            title="Average UPI by period",
+            labels={"period": "Period", "UPI": "Avg UPI"},
         )
-        st.plotly_chart(fig_reg, use_container_width=True)
-    else:
-        st.info("Add 'region' column to see regional risk.")
+        st.plotly_chart(fig_trend, use_container_width=True)
 
-    st.markdown("### Top 10 providers by average UPI")
-    prov = (
-        data.groupby("provider_name")["UPI"]
-        .mean()
-        .reset_index()
-        .sort_values("UPI", ascending=False)
-        .head(10)
-    )
-    fig_prov = px.bar(
-        prov,
-        x="provider_name",
-        y="UPI",
-        title="Top 10 providers by Avg UPI",
-        labels={"provider_name": "Provider", "UPI": "Avg UPI"},
-        color="UPI",
-        color_continuous_scale="Plasma",
-    )
-    st.plotly_chart(fig_prov, use_container_width=True)
-    st.dataframe(prov, use_container_width=True)
+    with row1_col2:
+        if has_premium:
+            tmp = (
+                data.groupby("period")
+                .agg(
+                    avg_upi=("UPI", "mean"),
+                    claims=("claims_amount", "sum"),
+                    premium=("premium_amount", "sum"),
+                )
+                .reset_index()
+            )
+            tmp["loss_ratio"] = 100.0 * tmp["claims"] / (tmp["premium"] + 1e-9)
+            fig_lr = px.line(
+                tmp,
+                x="period",
+                y=["avg_upi", "loss_ratio"],
+                markers=True,
+                title="Average UPI vs Loss Ratio",
+                labels={"value": "Value", "period": "Period", "variable": "Metric"},
+            )
+            st.plotly_chart(fig_lr, use_container_width=True)
+        else:
+            st.info("Column 'premium_amount' not found – loss ratio cannot be computed.")
 
-# ---------------------------------------------------------------------
-# LEVEL 2 – FACILITY PERFORMANCE
-# ---------------------------------------------------------------------
-with tab2:
-    st.subheader("Level 2 – Facility Performance")
+    # Row 2: Region + Top providers
+    row2_col1, row2_col2 = st.columns(2)
+
+    with row2_col1:
+        st.markdown("##### Average UPI by region")
+        if has_region:
+            reg = data.groupby("region")["UPI"].mean().reset_index()
+            fig_reg = px.bar(
+                reg,
+                x="region",
+                y="UPI",
+                title="Average UPI by region",
+                labels={"region": "Region", "UPI": "Avg UPI"},
+                color="UPI",
+                color_continuous_scale="Viridis",
+            )
+            st.plotly_chart(fig_reg, use_container_width=True)
+        else:
+            st.info("Add 'region' column to see regional risk.")
+
+    with row2_col2:
+        st.markdown("##### Top 10 providers by average UPI")
+        prov = (
+            data.groupby("provider_name")["UPI"]
+            .mean()
+            .reset_index()
+            .sort_values("UPI", ascending=False)
+            .head(10)
+        )
+        fig_prov = px.bar(
+            prov,
+            x="provider_name",
+            y="UPI",
+            title="Top 10 providers by Avg UPI",
+            labels={"provider_name": "Provider", "UPI": "Avg UPI"},
+            color="UPI",
+            color_continuous_scale="Plasma",
+        )
+        st.plotly_chart(fig_prov, use_container_width=True)
+        st.dataframe(prov, use_container_width=True)
+
+# =====================================================================
+# PROVIDER / NETWORK VIEW
+# =====================================================================
+
+elif mode == "Provider / Network":
+    st.subheader("Provider / Network Performance")
 
     providers = sorted(data["provider_name"].unique())
     selected_provider = st.selectbox("Select provider", providers)
 
     d = data[data["provider_name"] == selected_provider]
 
+    # KPIs
     c1, c2, c3 = st.columns(3)
     c1.metric("Patients", len(d))
     c2.metric("High-risk", int((d["risk_level"] == "High Risk").sum()))
     c3.metric("Avg UPI", f"{float(d['UPI'].mean()):.1f}")
 
-    st.markdown("---")
+    st.markdown("#### Provider Risk Profile")
 
-    st.markdown("### Risk composition (mean of scores)")
-    comp = d[["BAS", "CRS", "CARS", "PCS", "PPS", "FEI"]].mean().reset_index()
-    comp.columns = ["Score", "Value"]
-    fig_comp = px.bar(
-        comp,
-        x="Score",
-        y="Value",
-        title=f"Risk composition – {selected_provider}",
-        labels={"Score": "Component", "Value": "Mean value"},
-        color="Value",
-        color_continuous_scale="Tealgrn",
-    )
-    st.plotly_chart(fig_comp, use_container_width=True)
+    # Row 1: Risk composition + Provider vs network
+    row1_col1, row1_col2 = st.columns(2)
 
-    st.markdown("### Provider vs Network average UPI")
-    col_a, col_b = st.columns(2)
-    col_a.metric("Provider Avg UPI", f"{float(d['UPI'].mean()):.1f}")
-    col_b.metric("Network Avg UPI", f"{avg_upi:.1f}")
+    with row1_col1:
+        comp = d[["BAS", "CRS", "CARS", "PCS", "PPS", "FEI"]].mean().reset_index()
+        comp.columns = ["Score", "Value"]
+        fig_comp = px.bar(
+            comp,
+            x="Score",
+            y="Value",
+            title=f"Risk composition – {selected_provider}",
+            labels={"Score": "Component", "Value": "Mean value"},
+            color="Value",
+            color_continuous_scale="Tealgrn",
+        )
+        st.plotly_chart(fig_comp, use_container_width=True)
 
-    st.markdown("### DRG risk trend for this provider")
-    drg_trend = (
-        d.groupby(["period", "drg_group"])["UPI"]
+    with row1_col2:
+        col_a, col_b = st.columns(2)
+        col_a.metric("Provider Avg UPI", f"{float(d['UPI'].mean()):.1f}")
+        col_b.metric("Network Avg UPI", f"{avg_upi:.1f}")
+
+        drg_prov = (
+            d.groupby("drg_group")["UPI"]
+            .mean()
+            .reset_index()
+            .sort_values("UPI", ascending=False)
+        )
+        fig_drg_prov = px.bar(
+            drg_prov,
+            x="drg_group",
+            y="UPI",
+            title=f"Average UPI by DRG – {selected_provider}",
+            labels={"drg_group": "DRG", "UPI": "Avg UPI"},
+            color="UPI",
+            color_continuous_scale="Plasma",
+        )
+        st.plotly_chart(fig_drg_prov, use_container_width=True)
+
+    st.markdown("#### Time Series – DRG & PCS")
+
+    # Row 2: DRG trend + PCS trend
+    row2_col1, row2_col2 = st.columns(2)
+
+    with row2_col1:
+        drg_trend = (
+            d.groupby(["period", "drg_group"])["UPI"]
+            .mean()
+            .reset_index()
+            .sort_values(["period", "drg_group"])
+        )
+        fig_drg_trend = px.line(
+            drg_trend,
+            x="period",
+            y="UPI",
+            color="drg_group",
+            markers=True,
+            title="Avg UPI by DRG over time",
+            labels={"period": "Period", "UPI": "Avg UPI", "drg_group": "DRG"},
+        )
+        st.plotly_chart(fig_drg_trend, use_container_width=True)
+
+    with row2_col2:
+        pcs_trend = (
+            d.groupby("period")["PCS"]
+            .mean()
+            .reset_index()
+            .sort_values("period")
+        )
+        fig_pcs = px.line(
+            pcs_trend,
+            x="period",
+            y="PCS",
+            markers=True,
+            title="PCS trend (documentation/compliance)",
+            labels={"period": "Period", "PCS": "PCS"},
+        )
+        st.plotly_chart(fig_pcs, use_container_width=True)
+
+    # Network-level DRG heatmap (for context)
+    st.markdown("#### Network DRG Risk Heatmap")
+
+    matrix = (
+        data.groupby(["provider_name", "drg_group"])["UPI"]
         .mean()
         .reset_index()
-        .sort_values(["period", "drg_group"])
     )
-    fig_drg_trend = px.line(
-        drg_trend,
-        x="period",
-        y="UPI",
-        color="drg_group",
-        markers=True,
-        title="Average UPI by DRG over time (selected provider)",
-        labels={"period": "Period", "UPI": "Avg UPI", "drg_group": "DRG"},
-    )
-    st.plotly_chart(fig_drg_trend, use_container_width=True)
+    pivot = matrix.pivot(index="provider_name", columns="drg_group", values="UPI")
+    st.dataframe(pivot, use_container_width=True)
 
-    st.markdown("### PCS (documentation/compliance) trend")
-    pcs_trend = (
-        d.groupby("period")["PCS"]
-        .mean()
-        .reset_index()
-        .sort_values("period")
+    fig_hm = px.imshow(
+        pivot,
+        aspect="auto",
+        labels={"x": "DRG", "y": "Provider", "color": "Avg UPI"},
+        title="Provider × DRG – Average UPI heatmap (network)",
     )
-    fig_pcs = px.line(
-        pcs_trend,
-        x="period",
-        y="PCS",
-        markers=True,
-        title="PCS trend (selected provider)",
-        labels={"period": "Period", "PCS": "PCS"},
-    )
-    st.plotly_chart(fig_pcs, use_container_width=True)
+    st.plotly_chart(fig_hm, use_container_width=True)
 
-# ---------------------------------------------------------------------
-# LEVEL 3 – PATIENT PANEL (with Timeline)
-# ---------------------------------------------------------------------
-with tab3:
-    st.subheader("Level 3 – Patient Risk Panel")
+# =====================================================================
+# PATIENT PANEL
+# =====================================================================
+
+elif mode == "Patient Panel":
+    st.subheader("Patient Risk Panel & Timeline")
 
     patients = sorted(data["patient_id"].unique())
     selected_patient = st.selectbox("Select patient", patients)
@@ -637,14 +653,13 @@ with tab3:
     pt = pt.sort_values("period")
     latest = pt.iloc[-1]
 
+    # KPIs
     c1, c2, c3 = st.columns(3)
     c1.metric("UPI (latest)", f"{float(latest['UPI']):.1f}")
     c2.metric("Risk level", latest["risk_level"])
     c3.metric("Provider (latest)", str(latest["provider_name"]))
 
-    st.markdown("---")
-
-    st.markdown("### A) Risk drivers – latest record")
+    st.markdown("#### A) Latest Risk Drivers")
 
     drivers = pd.DataFrame(
         {
@@ -675,9 +690,7 @@ with tab3:
     c4.metric("PCS (latest)", f"{float(latest['PCS']):.1f}")
     c5.metric("Provider penalty (latest)", f"{float(latest['provider_penalty']):.1f}")
 
-    st.markdown("---")
-
-    st.markdown("### B) Patient Risk Timeline (multi-metric)")
+    st.markdown("#### B) Risk Timeline (UPI + components)")
 
     if len(pt) >= 2:
         timeline_metrics = ["UPI", "BAS", "CRS", "CARS", "PCS", "PPS", "FEI"]
@@ -702,52 +715,63 @@ with tab3:
         st.plotly_chart(fig_timeline, use_container_width=True)
 
         st.caption(
-            "هذه الرسوم توضح تطوّر UPI وباقي المؤشرات (BAS, CRS, CARS, PCS, PPS, FEI) "
-            "عبر الفترات الزمنية لهذا المريض."
+            "This timeline shows how UPI and its components (BAS, CRS, CARS, PCS, PPS, FEI) "
+            "evolve over time for this patient."
         )
     else:
         st.info("Only one record available for this patient – timeline requires at least 2 periods.")
 
-    st.markdown("---")
-
-    st.markdown("### C) Financial & DRG variance Timeline")
+    st.markdown("#### C) Financial & DRG variance Timeline")
 
     if len(pt) >= 2:
         fin_df = pt[["period", "claims_amount", "drg_variance"]].copy()
 
-        fig_claims = px.bar(
-            fin_df,
-            x="period",
-            y="claims_amount",
-            title="Claims amount over time",
-            labels={"period": "Period", "claims_amount": "Claims amount"},
-        )
-        st.plotly_chart(fig_claims, use_container_width=True)
+        row_fin1, row_fin2 = st.columns(2)
 
-        fig_var = px.line(
-            fin_df,
-            x="period",
-            y="drg_variance",
-            markers=True,
-            title="DRG variance (%) over time",
-            labels={"period": "Period", "drg_variance": "DRG variance (%)"},
-        )
-        st.plotly_chart(fig_var, use_container_width=True)
+        with row_fin1:
+            fig_claims = px.bar(
+                fin_df,
+                x="period",
+                y="claims_amount",
+                title="Claims amount over time",
+                labels={"period": "Period", "claims_amount": "Claims amount"},
+            )
+            st.plotly_chart(fig_claims, use_container_width=True)
+
+        with row_fin2:
+            fig_var = px.line(
+                fin_df,
+                x="period",
+                y="drg_variance",
+                markers=True,
+                title="DRG variance (%) over time",
+                labels={"period": "Period", "drg_variance": "DRG variance (%)"},
+            )
+            st.plotly_chart(fig_var, use_container_width=True)
 
         st.caption(
-            "الرسوم أعلاه تربط بين تطوّر التكلفة الفعلية (claims) والانحراف عن تكلفة DRG المتوقعة (DRG variance) "
-            "لنفس المريض عبر الفترات."
+            "These charts link the actual claims trend with the deviation from DRG-expected cost "
+            "(DRG variance) for the same patient."
         )
     else:
         st.info("Financial timeline requires at least 2 records for this patient.")
 
-# ---------------------------------------------------------------------
-# DRG-LEVEL RISK COMPARISON
-# ---------------------------------------------------------------------
-with tab_drg:
-    st.subheader("DRG-Level Risk Comparison")
+# =====================================================================
+# ADVANCED TOOLS (DRG / VALIDATION / LOGS / SIMULATOR)
+# =====================================================================
 
-    st.markdown("### 1) Average UPI by DRG (network)")
+st.markdown("---")
+st.markdown("### Advanced Analytical Tools")
+
+tab_drg, tab_val, tab_logs, tab_sim = st.tabs(
+    ["DRG-Level Comparison", "Validation Lab", "Run Logs", "Business Impact Simulator"]
+)
+
+# DRG TAB
+with tab_drg:
+    st.subheader("DRG-Level Risk Comparison (Network)")
+
+    st.markdown("#### 1) Average UPI by DRG")
     drg_rank = (
         data.groupby("drg_group")["UPI"]
         .mean()
@@ -766,7 +790,7 @@ with tab_drg:
     st.plotly_chart(fig_drg_rank, use_container_width=True)
     st.dataframe(drg_rank, use_container_width=True)
 
-    st.markdown("### 2) Average DRG variance (%) by DRG (network)")
+    st.markdown("#### 2) Average DRG variance (%) by DRG")
     drg_var_rank = (
         data.groupby("drg_group")["drg_variance"]
         .mean()
@@ -785,55 +809,11 @@ with tab_drg:
     st.plotly_chart(fig_drg_var, use_container_width=True)
     st.dataframe(drg_var_rank, use_container_width=True)
 
-    st.markdown("### 3) Provider × DRG – UPI heatmap")
-    matrix = (
-        data.groupby(["provider_name", "drg_group"])["UPI"]
-        .mean()
-        .reset_index()
-    )
-    pivot = matrix.pivot(index="provider_name", columns="drg_group", values="UPI")
-    st.dataframe(pivot, use_container_width=True)
-
-    fig_hm = px.imshow(
-        pivot,
-        aspect="auto",
-        labels={"x": "DRG", "y": "Provider", "color": "Avg UPI"},
-        title="Provider × DRG – Average UPI heatmap",
-    )
-    st.plotly_chart(fig_hm, use_container_width=True)
-
-    st.markdown("### 4) DRG profile for a selected provider")
-    providers2 = sorted(data["provider_name"].unique())
-    selected_provider2 = st.selectbox(
-        "Select provider for DRG profile", providers2, key="prov_drg"
-    )
-
-    df_prov = data[data["provider_name"] == selected_provider2]
-    drg_prov = (
-        df_prov.groupby("drg_group")["UPI"]
-        .mean()
-        .reset_index()
-        .sort_values("UPI", ascending=False)
-    )
-    fig_drg_prov = px.bar(
-        drg_prov,
-        x="drg_group",
-        y="UPI",
-        title=f"Average UPI by DRG – {selected_provider2}",
-        labels={"drg_group": "DRG", "UPI": "Avg UPI"},
-        color="UPI",
-        color_continuous_scale="Plasma",
-    )
-    st.plotly_chart(fig_drg_prov, use_container_width=True)
-    st.dataframe(drg_prov, use_container_width=True)
-
-# ---------------------------------------------------------------------
-# MODEL VALIDATION LAB
-# ---------------------------------------------------------------------
+# VALIDATION LAB
 with tab_val:
     st.subheader("Model Validation Lab – Correlation & Calibration")
 
-    st.markdown("### 1) Correlation matrix")
+    st.markdown("#### 1) Correlation matrix")
 
     candidate_cols = [
         "BAS",
@@ -862,9 +842,7 @@ with tab_val:
     else:
         st.info("Not enough numeric columns to compute correlation matrix.")
 
-    st.markdown("---")
-
-    st.markdown("### 2) UPI vs claims amount")
+    st.markdown("#### 2) UPI vs claims amount")
 
     df_sc = data.copy()
     df_sc["claims_amount"] = pd.to_numeric(df_sc["claims_amount"], errors="coerce")
@@ -887,9 +865,7 @@ with tab_val:
     else:
         st.info("Not enough valid data to plot UPI vs claims.")
 
-    st.markdown("---")
-
-    st.markdown("### 3) Provider avg UPI vs avg DRG variance")
+    st.markdown("#### 3) Provider avg UPI vs avg DRG variance")
 
     prov_val = (
         data.groupby("provider_name")
@@ -919,9 +895,7 @@ with tab_val:
     else:
         st.info("No provider-level aggregates available.")
 
-    st.markdown("---")
-
-    st.markdown("### 4) DRG variance distribution")
+    st.markdown("#### 4) DRG variance distribution")
     dv = pd.to_numeric(data["drg_variance"], errors="coerce").dropna()
     if len(dv) > 0:
         fig_hist = px.histogram(
@@ -934,13 +908,9 @@ with tab_val:
     else:
         st.info("No DRG variance data to display.")
 
-# ---------------------------------------------------------------------
 # LOGS
-# ---------------------------------------------------------------------
 with tab_logs:
-    st.subheader("Model Governance / Logs")
-
-    st.markdown("### Run history (from logs/upi_runs_log.csv)")
+    st.subheader("Run Logs – Model Governance")
 
     if os.path.isfile(LOG_FILE):
         log_df = pd.read_csv(LOG_FILE)
@@ -959,45 +929,48 @@ with tab_logs:
             )
             st.plotly_chart(fig_log_trend, use_container_width=True)
     else:
-        st.info("No log file found yet. Use 'Log this run' in Level 1 to create it.")
+        st.info("No log file found yet. Use 'Log this run' in Executive view to create it.")
 
-# ---------------------------------------------------------------------
-# BUSINESS IMPACT SIMULATOR (MVP FOR BUSINESS)
-# ---------------------------------------------------------------------
+# SIMULATOR
 with tab_sim:
     st.subheader("Business Impact Simulator (What-if Analysis)")
 
     st.write(
-        "⚠️ هذا التبويب يستخدم بيانات تجريبية / أو غير معتمدة بعد، "
-        "والمخرجات لغرض توضيح الفكرة فقط، وليست أداة قرار نهائي."
+        "⚠️ This tab uses hypothetical improvements (PCS/PPS) on the current dataset. "
+        "Outputs are for scenario illustration only."
     )
 
     scope = st.radio(
         "Scope of improvement",
         ["All providers", "Single provider"],
         horizontal=True,
+        key="sim_scope",
     )
 
     if scope == "Single provider":
         prov_list = sorted(data["provider_name"].unique())
         selected_scope_provider = st.selectbox(
-            "Select provider for simulation", prov_list
+            "Select provider for simulation", prov_list, key="sim_provider"
         )
         mask_scope = data["provider_name"] == selected_scope_provider
     else:
         selected_scope_provider = None
         mask_scope = pd.Series(True, index=data.index)
 
-    st.markdown("### Choose improvement scenario")
+    st.markdown("#### Choose improvement scenario")
 
-    improve_pcs = st.checkbox("Improve PCS", value=True)
+    improve_pcs = st.checkbox("Improve PCS", value=True, key="sim_pcs")
     delta_pcs = (
-        st.slider("PCS improvement (points)", 0.0, 20.0, 5.0) if improve_pcs else 0.0
+        st.slider("PCS improvement (points)", 0.0, 20.0, 5.0, key="sim_pcs_delta")
+        if improve_pcs
+        else 0.0
     )
 
-    improve_pps = st.checkbox("Improve PPS (performance)", value=False)
+    improve_pps = st.checkbox("Improve PPS (performance)", value=False, key="sim_pps")
     delta_pps = (
-        st.slider("PPS improvement (points)", 0.0, 20.0, 5.0) if improve_pps else 0.0
+        st.slider("PPS improvement (points)", 0.0, 20.0, 5.0, key="sim_pps_delta")
+        if improve_pps
+        else 0.0
     )
 
     if not improve_pcs and not improve_pps:
@@ -1025,7 +998,7 @@ with tab_sim:
         sim_high = int((sim["risk_level"] == "High Risk").sum())
         sim_avg_upi = float(sim["UPI"].mean())
 
-        st.markdown("### Results – Before vs After")
+        st.markdown("#### Results – Before vs After")
 
         c1, c2, c3 = st.columns(3)
         c1.metric("High-risk patients (baseline)", base_high)
@@ -1040,7 +1013,7 @@ with tab_sim:
             f"{sim_avg_upi - base_avg_upi:+.1f}",
         )
 
-        st.markdown("### Risk distribution – baseline vs simulation")
+        st.markdown("#### Risk distribution – baseline vs simulation")
 
         def risk_counts(df, label):
             ct = df["risk_level"].value_counts().reindex(
@@ -1066,7 +1039,7 @@ with tab_sim:
         )
         st.plotly_chart(fig_risk, use_container_width=True)
 
-        st.markdown("### Top patients with largest UPI improvement")
+        st.markdown("#### Top patients with largest UPI improvement")
 
         merged = base[["patient_id", "UPI"]].merge(
             sim[["patient_id", "UPI"]],
@@ -1081,6 +1054,7 @@ with tab_sim:
 # =====================================================================
 # FOOTER SIGNATURE
 # =====================================================================
+
 st.markdown(
     f"<div class='footer'>Developed by <b>Mudather</b> • {MODEL_VERSION} • "
     + pd.Timestamp.today().strftime("%Y-%m-%d")
